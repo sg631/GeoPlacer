@@ -2,7 +2,7 @@
 <html>
   <head>
     <style>
-      /* Basic styles */
+      /* Basic layout */
       #container,
       #mainMenu {
         height: 100vh;
@@ -25,7 +25,7 @@
         flex-direction: column;
         margin-top: 20px;
       }
-      /* New multiplayer options style */
+      /* Multiplayer options – only show when Multiplayer Mode is checked */
       #multiplayerOptions {
         display: none;
       }
@@ -74,7 +74,7 @@
         cursor: pointer;
       }
     </style>
-    <title>Geoplacer – GeoPlacer Clone</title>
+    <title>GeoPlacer – Optimized Multiplayer Code</title>
   </head>
   <body>
     <div id="mainMenu">
@@ -82,9 +82,8 @@
       <div id="gameOptions">
         <label><input type="checkbox" id="timedMode"> Timed Mode</label>
         <div id="timerOptions" style="display:none">
-          <label>
-            Timer Duration (minutes): 
-            <input type="number" id="timerDuration" value="1" min="1">
+          <label>Timer Duration (seconds): 
+            <input type="number" id="timerDuration" value="60" min="6" max="3600">
           </label>
         </div>
         <label><input type="checkbox" id="hardMode"> Hard Mode (No City Check)</label>
@@ -94,7 +93,7 @@
         <div id="multiplayerOptions">
           <label>
             Multiplayer Code (optional): 
-            <input type="text" id="multiplayerCode" placeholder="Enter 13-digit code">
+            <input type="text" id="multiplayerCode" placeholder="Enter 7-character code">
           </label>
         </div>
       </div>
@@ -110,10 +109,11 @@
     <div id="loadingDialog">Loading...</div>
     <div id="gameOverDistanceDialog">
       <span id="resultText"></span><br>
-      <!-- The "Next Map" button only shows in multiplayer mode -->
+      <!-- Next Map button appears only in multiplayer mode -->
       <button id="nextMapButton" style="display:none" onclick="nextMap()">Next Map</button>
       <button onclick="reopenMainMenu()">Main Menu</button>
     </div>
+    <!-- Google Maps API – be sure to supply your own API key -->
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB41DRUbKWJHPxaFjMAwdrzWzbVKartNGg&callback=initialize&v=weekly" defer="defer"></script>
   </body>
 </html>
@@ -122,18 +122,16 @@
    * Global Variables
    ***********************/
   let streetViewLatLng, userMarker, actualMarker, map, panorama, timerInterval;
-  // Game toggles and settings
+  // Game settings (timerDuration is now in seconds)
   let isTimedMode = false, isHardMode = false, timerDuration;
   let isMultiplayerMode = false;
-  // The seed (an integer) will be used by our simple RNG.
+  let isStaticMode = false, isNoNavLinksMode = false;
+  // Seed for our RNG – will be set from the multiplayer code or generated
   let currentSeed = 0;
-  // For the static and no navigation toggles we use separate flags.
-  let isStaticMode = false;
-  let isNoNavLinksMode = false;
 
   /***********************
    * Seeded Random Number Generator
-   * (A simple linear congruential generator)
+   * (Simple linear congruential generator)
    ***********************/
   function seededRandom() {
     currentSeed = (currentSeed * 9301 + 49297) % 233280;
@@ -141,22 +139,19 @@
   }
 
   /***********************
-   * Initialization and UI helpers
+   * Initialization and UI Helpers
    ***********************/
   function initialize() {
     showLoadingDialog(true);
     findRandomStreetView();
   }
-
   function showLoadingDialog(show) {
     document.getElementById("loadingDialog").style.display = show ? "block" : "none";
   }
-
   function showGameOverDistanceDialog(message) {
     document.getElementById("resultText").textContent = message;
     document.getElementById("gameOverDistanceDialog").style.display = "block";
   }
-
   function closeGameOverDistanceDialog() {
     document.getElementById("gameOverDistanceDialog").style.display = "none";
   }
@@ -174,8 +169,7 @@
     clearInterval(timerInterval);
   }
 
-  // startGame reads the checkboxes and—if multiplayer mode is enabled—either
-  // parses an entered 13‑digit code or generates one from the current toggles.
+  // When starting the game, if Multiplayer Mode is enabled, we either parse a 7‑character code or generate one.
   function startGame() {
     document.getElementById("mainMenu").style.display = "none";
     document.getElementById("container").style.display = "flex";
@@ -184,69 +178,78 @@
     document.getElementById("forfeitButton").style.display = "block";
 
     isMultiplayerMode = document.getElementById("multiplayerMode").checked;
-
     if (isMultiplayerMode) {
       let codeInput = document.getElementById("multiplayerCode").value.trim();
       if (codeInput) {
-        // Remove any spaces so that the code is 13 digits long.
+        // Remove spaces and expect exactly 7 characters.
         codeInput = codeInput.replace(/\s/g, "");
-        if (codeInput.length !== 13) {
-          alert("Invalid multiplayer code. Must be 13 digits.");
+        if (codeInput.length !== 7) {
+          alert("Invalid multiplayer code. Must be 7 characters.");
           return;
         }
-        // The first 6 digits are the seed.
-        let seedStr = codeInput.slice(0, 6);
-        // The remaining 7 digits encode the toggles and timer value.
-        let configStr = codeInput.slice(6); // 7 digits
-        currentSeed = parseInt(seedStr, 10);
-        isHardMode = configStr.charAt(0) === "1";
-        isTimedMode = configStr.charAt(1) === "1";
-        isStaticMode = configStr.charAt(2) === "1";
-        isNoNavLinksMode = configStr.charAt(3) === "1";
-        timerDuration = parseInt(configStr.slice(4), 10);
-        // Update UI so that the checkboxes reflect the parsed configuration.
+        // Decode the 7-character code:
+        // • First 4 characters (base36) = seed
+        // • 5th character (hex) = toggles (4 bits)
+        // • Last 2 characters (base36) = timer (in 6-second increments)
+        let seedStr = codeInput.slice(0, 4);
+        let toggleStr = codeInput.slice(4, 5);
+        let timerStr = codeInput.slice(5, 7);
+        currentSeed = parseInt(seedStr, 36);
+        let toggleVal = parseInt(toggleStr, 16);
+        isHardMode = Boolean(toggleVal & 8);
+        isTimedMode = Boolean(toggleVal & 4);
+        isStaticMode = Boolean(toggleVal & 2);
+        isNoNavLinksMode = Boolean(toggleVal & 1);
+        let timerIncrements = parseInt(timerStr, 36);
+        timerDuration = timerIncrements * 6; // in seconds
+        // Update the UI checkboxes and timer input accordingly.
         document.getElementById("hardMode").checked = isHardMode;
         document.getElementById("timedMode").checked = isTimedMode;
         document.getElementById("staticFrameMode").checked = isStaticMode;
         document.getElementById("noNavLinksMode").checked = isNoNavLinksMode;
         document.getElementById("timerDuration").value = timerDuration;
       } else {
-        // No code was entered – generate one from the current settings.
-        currentSeed = Math.floor(Math.random() * 1000000);
+        // No code was entered – generate one.
+        // Generate a 4‑character seed (base36).
+        currentSeed = Math.floor(Math.random() * (36 ** 4));
+        let seedCode = currentSeed.toString(36).toUpperCase().padStart(4, "0");
+        // Read the toggles from the UI.
         isHardMode = document.getElementById("hardMode").checked;
         isTimedMode = document.getElementById("timedMode").checked;
         isStaticMode = document.getElementById("staticFrameMode").checked;
         isNoNavLinksMode = document.getElementById("noNavLinksMode").checked;
+        // Pack the four toggles into a 4‑bit value:
+        // Bit 3: hard mode, Bit 2: timed mode, Bit 1: static mode, Bit 0: no‑nav links.
+        let toggleVal = 0;
+        if (isHardMode) toggleVal |= 8;
+        if (isTimedMode) toggleVal |= 4;
+        if (isStaticMode) toggleVal |= 2;
+        if (isNoNavLinksMode) toggleVal |= 1;
+        let toggleCode = toggleVal.toString(16).toUpperCase();
+        // Get the timer (in seconds) from the UI.
         timerDuration = parseInt(document.getElementById("timerDuration").value, 10);
-        // Build the config string:
-        // • 1 digit for hardMode,
-        // • 1 digit for timedMode,
-        // • 1 digit for staticFrameMode,
-        // • 1 digit for noNavLinksMode,
-        // • 3 digits for timerDuration (padded to three digits).
-        let configStr = 
-          (isHardMode ? "1" : "0") +
-          (isTimedMode ? "1" : "0") +
-          (isStaticMode ? "1" : "0") +
-          (isNoNavLinksMode ? "1" : "0") +
-          timerDuration.toString().padStart(3, "0");
-        let fullCode = currentSeed.toString().padStart(6, "0") + configStr;
-        // Show the code segmented as "xxx xxx xxx xxxx"
-        alert("Share this multiplayer code with your friend:\n" + fullCode.match(/.{1,3}/g).join(" "));
+        if (timerDuration < 6) timerDuration = 6;
+        if (timerDuration > 3600) timerDuration = 3600;
+        // Represent the timer as a number of 6‑second increments.
+        let timerIncrements = Math.floor(timerDuration / 6);
+        let timerCode = timerIncrements.toString(36).toUpperCase().padStart(2, "0");
+        let fullCode = seedCode + toggleCode + timerCode;
+        alert("Share this multiplayer code with your friend:\n" + fullCode);
       }
     } else {
-      // Single-player: just generate a seed from Math.random()
-      currentSeed = Math.floor(Math.random() * 1000000);
+      // Single‑player: generate a seed and read toggles from the UI.
+      currentSeed = Math.floor(Math.random() * (36 ** 4));
       isHardMode = document.getElementById("hardMode").checked;
       isTimedMode = document.getElementById("timedMode").checked;
       isStaticMode = document.getElementById("staticFrameMode").checked;
       isNoNavLinksMode = document.getElementById("noNavLinksMode").checked;
       timerDuration = parseInt(document.getElementById("timerDuration").value, 10);
+      if (timerDuration < 6) timerDuration = 6;
+      if (timerDuration > 3600) timerDuration = 3600;
     }
-
     resetGame();
     if (isTimedMode) {
-      startTimer(timerDuration * 60);
+      startTimer(timerDuration);
     } else {
       startStopwatch();
     }
@@ -265,14 +268,12 @@
       minutes = minutes < 10 ? "0" + minutes : minutes;
       secs = secs < 10 ? "0" + secs : secs;
       document.getElementById("timer").textContent = minutes + ":" + secs;
-      document.getElementById("timer").style.display = "block";
       if (--t < 0) {
         clearInterval(timerInterval);
         endGame();
       }
     }, 1000);
   }
-
   function startStopwatch() {
     let e = 0, minutes, secs;
     timerInterval = setInterval(function() {
@@ -281,11 +282,9 @@
       minutes = minutes < 10 ? "0" + minutes : minutes;
       secs = secs < 10 ? "0" + secs : secs;
       document.getElementById("timer").textContent = minutes + ":" + secs;
-      document.getElementById("timer").style.display = "block";
       e++;
     }, 1000);
   }
-
   function endGame() {
     disableInteraction();
     checkDistance();
@@ -294,8 +293,7 @@
   /***********************
    * Map / StreetView Functions
    ***********************/
-  // Instead of using Math.random(), we use our seededRandom() so that the same sequence
-  // of maps is generated if both players start with the same seed.
+  // Use our seededRandom() instead of Math.random() so that both players see the same sequence.
   function findRandomStreetView() {
     let attempts = 0;
     (function tryPanorama() {
@@ -333,7 +331,6 @@
       });
     })();
   }
-
   function updatePanorama(latlng) {
     streetViewLatLng = latlng;
     showLoadingDialog(false);
@@ -378,8 +375,7 @@
   /***********************
    * Game Rounds and Next Map
    ***********************/
-  // When the player checks the distance, we show the result dialog.
-  // In multiplayer mode we also display a "Next Map" button.
+  // When checking the distance, display the result dialog. In multiplayer mode, show the Next Map button.
   function checkDistance() {
     if (!userMarker || !streetViewLatLng) {
       alert("Place a pin first!");
@@ -401,9 +397,6 @@ Accuracy: ${Math.max(0, 100 - distance/100).toFixed(2)}%`);
       document.getElementById("nextMapButton").style.display = "none";
     }
   }
-
-  // In multiplayer mode after finishing a map the player (or both players)
-  // may press Enter (or click the "Next Map" button) to load the next round.
   function nextMap() {
     document.getElementById("gameOverDistanceDialog").style.display = "none";
     if (userMarker) { userMarker.setMap(null); userMarker = null; }
@@ -411,20 +404,18 @@ Accuracy: ${Math.max(0, 100 - distance/100).toFixed(2)}%`);
     document.getElementById("pano").innerHTML = "";
     clearInterval(timerInterval);
     if (isTimedMode) {
-      startTimer(timerDuration * 60);
+      startTimer(timerDuration);
     } else {
       startStopwatch();
     }
     showLoadingDialog(true);
     findRandomStreetView();
   }
-
   function reopenMainMenu() {
     resetGame();
     closeGameOverDistanceDialog();
     forfeit();
   }
-
   function resetGame() {
     if (userMarker) { userMarker.setMap(null); userMarker = null; }
     if (actualMarker) { actualMarker.setMap(null); actualMarker = null; }
@@ -434,7 +425,6 @@ Accuracy: ${Math.max(0, 100 - distance/100).toFixed(2)}%`);
     clearInterval(timerInterval);
     document.getElementById("pano").innerHTML = "";
   }
-
   function disableInteraction() {
     if (panorama) {
       panorama.setOptions({ disableDefaultUI: true, clickableIcons: false });
@@ -447,15 +437,15 @@ Accuracy: ${Math.max(0, 100 - distance/100).toFixed(2)}%`);
   /***********************
    * Event Listeners
    ***********************/
-  // Toggle timer options display.
+  // Show/hide the timer options.
   document.getElementById("timedMode").addEventListener("change", function() {
     document.getElementById("timerOptions").style.display = this.checked ? "block" : "none";
   });
-  // Toggle multiplayer options display.
+  // Show/hide the multiplayer options.
   document.getElementById("multiplayerMode").addEventListener("change", function() {
     document.getElementById("multiplayerOptions").style.display = this.checked ? "block" : "none";
   });
-  // In multiplayer mode, allow the player to press Enter to load the next map.
+  // In multiplayer mode, allow the user to press Enter (when the result dialog is open) to load the next map.
   document.addEventListener("keydown", function(e) {
     if (e.key === "Enter" &&
         document.getElementById("gameOverDistanceDialog").style.display === "block" &&
@@ -463,7 +453,5 @@ Accuracy: ${Math.max(0, 100 - distance/100).toFixed(2)}%`);
       nextMap();
     }
   });
-
-  // Make sure the Google API calls initialize() once loaded.
   window.initialize = initialize;
 </script>
