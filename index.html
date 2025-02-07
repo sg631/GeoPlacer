@@ -25,15 +25,17 @@
         flex-direction: column;
         margin-top: 20px;
       }
-      /* Multiplayer options – only show when Multiplayer Mode is checked */
+      /* Multiplayer options */
       #multiplayerOptions {
         display: none;
       }
+      /* Map & StreetView areas */
       #map,
       #pano {
         flex: 1;
         display: none;
       }
+      /* Buttons */
       #distanceButton,
       #forfeitButton,
       #timer {
@@ -44,17 +46,13 @@
         border: none;
         cursor: pointer;
       }
-      #distanceButton {
-        top: 10px;
-      }
-      #timer {
-        top: 100px;
-      }
-      #forfeitButton {
-        top: 50px;
-      }
+      #distanceButton { top: 10px; }
+      #forfeitButton { top: 50px; }
+      #timer { top: 100px; }
+      /* Dialogs */
+      #loadingDialog,
       #gameOverDistanceDialog,
-      #loadingDialog {
+      #codeDialog {
         position: absolute;
         top: 50%;
         left: 50%;
@@ -65,6 +63,23 @@
         border: 1px solid #ccc;
         display: none;
       }
+      #codeDialog { z-index: 30; }
+      /* Multiplayer info box in upper-right */
+      #multiplayerDisplayInfo {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: #fff;
+        padding: 10px;
+        border: 1px solid #ccc;
+        display: none;
+      }
+      #cheatStatus {
+        color: red;
+        font-weight: bold;
+        display: none;
+      }
+      /* Start button */
       #startButton {
         padding: 15px;
         border: none;
@@ -74,31 +89,46 @@
         cursor: pointer;
       }
     </style>
-    <title>GeoPlacer – Optimized Multiplayer Code</title>
+    <title>GeoPlacer – Multiplayer with Cheat Detection</title>
   </head>
   <body>
     <div id="mainMenu">
       <h1>GeoPlacer</h1>
       <div id="gameOptions">
-        <label><input type="checkbox" id="timedMode"> Timed Mode</label>
+        <label>
+          <input type="checkbox" id="timedMode"> Timed Mode
+        </label>
         <div id="timerOptions" style="display:none">
-          <label>Timer Duration (seconds): 
+          <label>
+            Timer Duration (seconds): 
             <input type="number" id="timerDuration" value="60" min="6" max="3600">
           </label>
         </div>
-        <label><input type="checkbox" id="hardMode"> Hard Mode (No City Check)</label>
-        <label><input type="checkbox" id="noNavLinksMode"> No Nav-Links Mode</label>
-        <label><input type="checkbox" id="staticFrameMode"> Static Frame Mode</label>
-        <label><input type="checkbox" id="multiplayerMode"> Multiplayer Mode</label>
+        <label>
+          <input type="checkbox" id="hardMode"> Hard Mode (No City Check)
+        </label>
+        <label>
+          <input type="checkbox" id="noNavLinksMode"> No Nav-Links Mode
+        </label>
+        <label>
+          <input type="checkbox" id="staticFrameMode"> Static Frame Mode
+        </label>
+        <label>
+          <input type="checkbox" id="multiplayerMode"> Multiplayer Mode
+        </label>
         <div id="multiplayerOptions">
           <label>
-            Multiplayer Code (optional): 
+            Multiplayer Code (optional, leave blank to auto-generate): 
             <input type="text" id="multiplayerCode" placeholder="Enter 7-character code">
+          </label>
+          <label>
+            <input type="checkbox" id="cheatDetection"> Enable Cheat Detection
           </label>
         </div>
       </div>
       <button onclick="startGame()" id="startButton">Start Game</button>
     </div>
+
     <div id="container">
       <div id="pano"></div>
       <div id="map"></div>
@@ -109,25 +139,38 @@
     <div id="loadingDialog">Loading...</div>
     <div id="gameOverDistanceDialog">
       <span id="resultText"></span><br>
-      <!-- Next Map button appears only in multiplayer mode -->
       <button id="nextMapButton" style="display:none" onclick="nextMap()">Next Map</button>
       <button onclick="reopenMainMenu()">Main Menu</button>
     </div>
-    <!-- Google Maps API – be sure to supply your own API key -->
+    <!-- Multiplayer Info Box (upper right) -->
+    <div id="multiplayerDisplayInfo">
+      Multiplayer Code: <span id="multiplayerCodeDisplay"></span>
+      <br>
+      <span id="cheatStatus">Cheat Detected: Tab lost focus!</span>
+    </div>
+    <!-- Code Dialog shown when auto-generating a code -->
+    <div id="codeDialog">
+      <p>Your Multiplayer Code is: <span id="codeDialogText"></span></p>
+      <button onclick="dismissCodeDialog()">Dismiss</button>
+    </div>
+
+    <!-- Google Maps API – supply your own API key -->
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB41DRUbKWJHPxaFjMAwdrzWzbVKartNGg&callback=initialize&v=weekly" defer="defer"></script>
   </body>
 </html>
+
 <script>
   /***********************
    * Global Variables
    ***********************/
   let streetViewLatLng, userMarker, actualMarker, map, panorama, timerInterval;
-  // Game settings (timerDuration is now in seconds)
   let isTimedMode = false, isHardMode = false, timerDuration;
   let isMultiplayerMode = false;
   let isStaticMode = false, isNoNavLinksMode = false;
-  // Seed for our RNG – will be set from the multiplayer code or generated
   let currentSeed = 0;
+  let autoGeneratedCode = "";
+  // cheatDetectionEnabled is read from the checkbox at game start.
+  let cheatDetectionEnabled = false;
 
   /***********************
    * Seeded Random Number Generator
@@ -155,6 +198,35 @@
   function closeGameOverDistanceDialog() {
     document.getElementById("gameOverDistanceDialog").style.display = "none";
   }
+  
+  // Code dialog (modal) functions.
+  function showCodeDialog(code) {
+    document.getElementById("codeDialogText").textContent = code;
+    document.getElementById("codeDialog").style.display = "block";
+  }
+  function dismissCodeDialog() {
+    document.getElementById("codeDialog").style.display = "none";
+    startGamePlay();
+  }
+  // Update the upper-right multiplayer info box.
+  function updateMultiplayerDisplay(code) {
+    let displayDiv = document.getElementById("multiplayerDisplayInfo");
+    document.getElementById("multiplayerCodeDisplay").textContent = code;
+    displayDiv.style.display = "block";
+  }
+
+  /***********************
+   * Cheat Detection (Tab Visibility)
+   ***********************/
+  // When cheat detection is enabled and the tab is hidden, show a warning.
+  document.addEventListener("visibilitychange", function() {
+    let cheatStatus = document.getElementById("cheatStatus");
+    if (document.hidden && document.getElementById("cheatDetection").checked) {
+      cheatStatus.style.display = "block";
+    } else {
+      cheatStatus.style.display = "none";
+    }
+  });
 
   /***********************
    * Game Controls
@@ -169,8 +241,9 @@
     clearInterval(timerInterval);
   }
 
-  // When starting the game, if Multiplayer Mode is enabled, we either parse a 7‑character code or generate one.
+  // startGame reads all the options. In Multiplayer Mode, if no code is entered a code is generated and shown in a modal dialog.
   function startGame() {
+    // Hide main menu; show game UI.
     document.getElementById("mainMenu").style.display = "none";
     document.getElementById("container").style.display = "flex";
     document.getElementById("distanceButton").style.display = "block";
@@ -178,19 +251,19 @@
     document.getElementById("forfeitButton").style.display = "block";
 
     isMultiplayerMode = document.getElementById("multiplayerMode").checked;
+    cheatDetectionEnabled = document.getElementById("cheatDetection").checked;
+
     if (isMultiplayerMode) {
       let codeInput = document.getElementById("multiplayerCode").value.trim();
       if (codeInput) {
-        // Remove spaces and expect exactly 7 characters.
+        // Use the entered code.
         codeInput = codeInput.replace(/\s/g, "");
         if (codeInput.length !== 7) {
           alert("Invalid multiplayer code. Must be 7 characters.");
           return;
         }
-        // Decode the 7-character code:
-        // • First 4 characters (base36) = seed
-        // • 5th character (hex) = toggles (4 bits)
-        // • Last 2 characters (base36) = timer (in 6-second increments)
+        // Parse the 7-character code:
+        // Characters 1–4 (base36) = seed, Character 5 (hex) = toggles, Characters 6–7 (base36) = timer (in 6-sec increments)
         let seedStr = codeInput.slice(0, 4);
         let toggleStr = codeInput.slice(4, 5);
         let timerStr = codeInput.slice(5, 7);
@@ -201,43 +274,43 @@
         isStaticMode = Boolean(toggleVal & 2);
         isNoNavLinksMode = Boolean(toggleVal & 1);
         let timerIncrements = parseInt(timerStr, 36);
-        timerDuration = timerIncrements * 6; // in seconds
-        // Update the UI checkboxes and timer input accordingly.
+        timerDuration = timerIncrements * 6;
+        // Update UI checkboxes accordingly.
         document.getElementById("hardMode").checked = isHardMode;
         document.getElementById("timedMode").checked = isTimedMode;
         document.getElementById("staticFrameMode").checked = isStaticMode;
         document.getElementById("noNavLinksMode").checked = isNoNavLinksMode;
         document.getElementById("timerDuration").value = timerDuration;
+        updateMultiplayerDisplay(codeInput.toUpperCase());
+        startGamePlay();
       } else {
-        // No code was entered – generate one.
-        // Generate a 4‑character seed (base36).
+        // No code was entered – auto-generate one.
         currentSeed = Math.floor(Math.random() * (36 ** 4));
         let seedCode = currentSeed.toString(36).toUpperCase().padStart(4, "0");
-        // Read the toggles from the UI.
         isHardMode = document.getElementById("hardMode").checked;
         isTimedMode = document.getElementById("timedMode").checked;
         isStaticMode = document.getElementById("staticFrameMode").checked;
         isNoNavLinksMode = document.getElementById("noNavLinksMode").checked;
-        // Pack the four toggles into a 4‑bit value:
-        // Bit 3: hard mode, Bit 2: timed mode, Bit 1: static mode, Bit 0: no‑nav links.
+        // Pack the four toggles into a 4‑bit value.
         let toggleVal = 0;
         if (isHardMode) toggleVal |= 8;
         if (isTimedMode) toggleVal |= 4;
         if (isStaticMode) toggleVal |= 2;
         if (isNoNavLinksMode) toggleVal |= 1;
         let toggleCode = toggleVal.toString(16).toUpperCase();
-        // Get the timer (in seconds) from the UI.
         timerDuration = parseInt(document.getElementById("timerDuration").value, 10);
         if (timerDuration < 6) timerDuration = 6;
         if (timerDuration > 3600) timerDuration = 3600;
-        // Represent the timer as a number of 6‑second increments.
         let timerIncrements = Math.floor(timerDuration / 6);
         let timerCode = timerIncrements.toString(36).toUpperCase().padStart(2, "0");
-        let fullCode = seedCode + toggleCode + timerCode;
-        alert("Share this multiplayer code with your friend:\n" + fullCode);
+        autoGeneratedCode = seedCode + toggleCode + timerCode;
+        updateMultiplayerDisplay(autoGeneratedCode);
+        // Show the code dialog (modal) with a dismiss button.
+        showCodeDialog(autoGeneratedCode);
+        return; // Do not start game until the code dialog is dismissed.
       }
     } else {
-      // Single‑player: generate a seed and read toggles from the UI.
+      // Single-player mode.
       currentSeed = Math.floor(Math.random() * (36 ** 4));
       isHardMode = document.getElementById("hardMode").checked;
       isTimedMode = document.getElementById("timedMode").checked;
@@ -247,6 +320,11 @@
       if (timerDuration < 6) timerDuration = 6;
       if (timerDuration > 3600) timerDuration = 3600;
     }
+    startGamePlay();
+  }
+
+  // startGamePlay contains the actual game/timer start logic.
+  function startGamePlay() {
     resetGame();
     if (isTimedMode) {
       startTimer(timerDuration);
@@ -293,7 +371,7 @@
   /***********************
    * Map / StreetView Functions
    ***********************/
-  // Use our seededRandom() instead of Math.random() so that both players see the same sequence.
+  // Use seededRandom() so that both players see the same sequence in multiplayer mode.
   function findRandomStreetView() {
     let attempts = 0;
     (function tryPanorama() {
@@ -306,9 +384,7 @@
       }, function(data, status) {
         if (status === "OK") {
           if (isHardMode) {
-            new google.maps.Geocoder().geocode({
-              location: data.location.latLng
-            }, function(results, geocodeStatus) {
+            new google.maps.Geocoder().geocode({ location: data.location.latLng }, function(results, geocodeStatus) {
               if (geocodeStatus === "OK" && results[0]) {
                 if (results[0].address_components.some(component => component.types.includes("locality"))) {
                   attempts++;
@@ -375,7 +451,6 @@
   /***********************
    * Game Rounds and Next Map
    ***********************/
-  // When checking the distance, display the result dialog. In multiplayer mode, show the Next Map button.
   function checkDistance() {
     if (!userMarker || !streetViewLatLng) {
       alert("Place a pin first!");
@@ -383,7 +458,7 @@
     }
     let distance = google.maps.geometry.spherical.computeDistanceBetween(userMarker.getPosition(), streetViewLatLng) / 1000;
     showGameOverDistanceDialog(`Distance: ${distance.toFixed(2)} km
-Accuracy: ${Math.max(0, 100 - distance/100).toFixed(2)}%`);
+Accuracy: ${Math.max(0, 100 - distance / 100).toFixed(2)}%`);
     if (!actualMarker) {
       actualMarker = new google.maps.Marker({
         position: streetViewLatLng,
@@ -437,15 +512,15 @@ Accuracy: ${Math.max(0, 100 - distance/100).toFixed(2)}%`);
   /***********************
    * Event Listeners
    ***********************/
-  // Show/hide the timer options.
+  // Toggle timer options visibility.
   document.getElementById("timedMode").addEventListener("change", function() {
     document.getElementById("timerOptions").style.display = this.checked ? "block" : "none";
   });
-  // Show/hide the multiplayer options.
+  // Toggle multiplayer options visibility.
   document.getElementById("multiplayerMode").addEventListener("change", function() {
     document.getElementById("multiplayerOptions").style.display = this.checked ? "block" : "none";
   });
-  // In multiplayer mode, allow the user to press Enter (when the result dialog is open) to load the next map.
+  // Allow pressing Enter to proceed to the next map in multiplayer mode.
   document.addEventListener("keydown", function(e) {
     if (e.key === "Enter" &&
         document.getElementById("gameOverDistanceDialog").style.display === "block" &&
