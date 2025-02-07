@@ -64,15 +64,16 @@
         display: none;
       }
       #codeDialog { z-index: 30; }
-      /* Multiplayer info box in upper-right */
+      /* Multiplayer info box – repositioned to the top left */
       #multiplayerDisplayInfo {
         position: absolute;
         top: 10px;
-        right: 10px;
+        left: 10px;
         background: #fff;
         padding: 10px;
         border: 1px solid #ccc;
         display: none;
+        z-index: 20;
       }
       #cheatStatus {
         color: red;
@@ -142,7 +143,7 @@
       <button id="nextMapButton" style="display:none" onclick="nextMap()">Next Map</button>
       <button onclick="reopenMainMenu()">Main Menu</button>
     </div>
-    <!-- Multiplayer Info Box (upper right) -->
+    <!-- Multiplayer Info Box (now in the upper left) -->
     <div id="multiplayerDisplayInfo">
       Multiplayer Code: <span id="multiplayerCodeDisplay"></span>
       <br>
@@ -208,7 +209,7 @@
     document.getElementById("codeDialog").style.display = "none";
     startGamePlay();
   }
-  // Update the upper-right multiplayer info box.
+  // Update the multiplayer info box.
   function updateMultiplayerDisplay(code) {
     let displayDiv = document.getElementById("multiplayerDisplayInfo");
     document.getElementById("multiplayerCodeDisplay").textContent = code;
